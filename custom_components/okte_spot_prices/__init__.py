@@ -22,10 +22,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     fetch_minute = entry.options.get("fetch_minute", entry.data.get("fetch_minute", DEFAULT_FETCH_MINUTE))
 
     coordinator = OKTEDataUpdateCoordinator(hass, fetch_hour, fetch_minute)
-
-    # Initial fetch on setup
     await coordinator.async_config_entry_first_refresh()
-
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
     await hass.config_entries.async_forward_entry_setups(entry, ["sensor", "button"])
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
@@ -43,53 +40,68 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return unload_ok
 
 
+def _parse_price(text: str) -> float | None:
+    """Parse price string like '121,34' or '121.34' or '-15,37 €/MWh' to float."""
+    cleaned = (
+        text
+        .replace("\u20ac/MWh", "")
+        .replace("\xa0", "")
+        .replace(" ", "")
+        .replace("\t", "")
+        .replace(",", ".")
+        .strip()
+    )
+    try:
+        return float(cleaned)
+    except ValueError:
+        return None
+
+
+def _find_price_column(header_row) -> int:
+    """Auto-detect the Cena (€/MWh) column index from the table header."""
+    if header_row is None:
+        return 2  # default fallback based on observed OKTE structure
+    for i, th in enumerate(header_row.find_all(["th", "td"])):
+        text = th.get_text(strip=True).lower()
+        if "cena" in text or "price" in text or "eur" in text or "mwh" in text:
+            return i
+    return 2  # fallback: Perióda(0), Čas(1), Cena(2)
+
+
 class OKTEDataUpdateCoordinator(DataUpdateCoordinator):
-    """Fetches OKTE prices once daily at configured time. Current price is derived from cache."""
+    """Fetches OKTE prices once daily at configured time."""
 
     def __init__(self, hass: HomeAssistant, fetch_hour: int, fetch_minute: int) -> None:
-        # update_interval=None: we control updates manually via time tracking
         super().__init__(hass, _LOGGER, name=DOMAIN, update_interval=None)
         self.fetch_hour = fetch_hour
         self.fetch_minute = fetch_minute
-        self._unsub_time = None
         self._raw_prices: list[float] = []
         self._prices_date: str = ""
 
-        # Register daily time-based trigger
         self._unsub_time = async_track_time_change(
-            hass,
-            self._scheduled_update,
-            hour=fetch_hour,
-            minute=fetch_minute,
-            second=0,
+            hass, self._scheduled_update,
+            hour=fetch_hour, minute=fetch_minute, second=0,
         )
-        # Also update current_price index every 15 minutes
         self._unsub_15min = async_track_time_change(
-            hass,
-            self._update_current_from_cache,
-            minute=[0, 15, 30, 45],
-            second=0,
+            hass, self._update_current_from_cache,
+            minute=[0, 15, 30, 45], second=0,
         )
 
     async def _scheduled_update(self, now=None):
-        """Called daily at fetch_hour:fetch_minute to refresh OKTE data."""
-        _LOGGER.info("OKTE: scheduled daily fetch triggered")
+        _LOGGER.info("OKTE: scheduled daily fetch at %02d:%02d", self.fetch_hour, self.fetch_minute)
         await self.async_refresh()
 
     async def _update_current_from_cache(self, now=None):
-        """Called every :00/:15/:30/:45 to update current_price from cached data."""
         if not self._raw_prices:
             return
         self._inject_current_price()
         self.async_set_updated_data(self.data)
 
     def _get_price_index(self) -> int:
-        """Return the index (0-95) for the current 15-min period."""
         now = datetime.now()
         return (now.hour * 4) + (now.minute // 15)
 
     def _inject_current_price(self):
-        """Update current_price and next_price in data based on current time."""
         if not self.data or not self._raw_prices:
             return
         idx = self._get_price_index()
@@ -121,25 +133,22 @@ class OKTEDataUpdateCoordinator(DataUpdateCoordinator):
             if table is None:
                 raise UpdateFailed("OKTE: table not found in page")
 
+            # Auto-detect the Cena column from header
+            header_row = table.find("tr")
+            price_col = _find_price_column(header_row)
+            _LOGGER.debug("OKTE: using price column index %d", price_col)
+
             prices = []
             for row in table.find_all("tr")[1:]:
                 cols = row.find_all("td")
-                if len(cols) < 4:
+                if len(cols) <= price_col:
                     continue
-                raw = (
-                    cols[3].get_text(strip=True)
-                    .replace("\u20ac/MWh", "")
-                    .replace("\xa0", "")
-                    .replace(" ", "")
-                    .replace(",", ".")
-                )
-                try:
-                    prices.append(float(raw))
-                except ValueError:
-                    continue
+                val = _parse_price(cols[price_col].get_text(strip=True))
+                if val is not None:
+                    prices.append(val)
 
             if not prices:
-                raise UpdateFailed("OKTE: no prices parsed")
+                raise UpdateFailed(f"OKTE: no prices parsed (tried column {price_col})")
 
             self._raw_prices = prices[:96]
             self._prices_date = today
@@ -149,7 +158,10 @@ class OKTEDataUpdateCoordinator(DataUpdateCoordinator):
             nxt = self._raw_prices[idx + 1] if (idx + 1) < len(self._raw_prices) else None
             upcoming_5 = self._raw_prices[idx:idx + 5]
 
-            _LOGGER.info("OKTE %s: %d prices fetched, current index %d = %.2f €/MWh", today, len(prices), idx, current or 0)
+            _LOGGER.info(
+                "OKTE %s: %d prices (col %d), idx=%d current=%.2f \u20ac/MWh",
+                today, len(prices), price_col, idx, current or 0
+            )
 
             return {
                 "date": today,
