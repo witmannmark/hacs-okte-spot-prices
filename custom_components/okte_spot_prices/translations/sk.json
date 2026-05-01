@@ -1,0 +1,26 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "OKTE Spot Ceny",
+        "description": "Nastavenie sl\u00e1vnych OKTE denn\u00fdch cien elektriny. D\u00e1ta sa nach\u00e1dzaj\u00fa na okte.sk.",
+        "data": {
+          "scan_interval": "Interval aktuali\u017e\u00e1cie (min\u00fast)"
+        }
+      }
+    },
+    "abort": {
+      "single_instance_allowed": "Povolená je iba jedna in\u0161t\u00e1ncia OKTE Spot Ceny."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Mo\u017enosti OKTE Spot Ceny",
+        "data": {
+          "scan_interval": "Interval aktuali\u017e\u00e1cie (min\u00fast)"
+        }
+      }
+    }
+  }
+}
