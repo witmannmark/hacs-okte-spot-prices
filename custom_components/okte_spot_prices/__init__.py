@@ -1,11 +1,14 @@
-"""OKTE Spot Prices - Slovak electricity day-ahead prices."""
+"""OKTE Spot Prices - Slovak electricity day-ahead prices.
+
+Data source: https://isot.okte.sk/api/v1/dam/results/detail?deliveryDay=YYYY-MM-DD
+Official OKTE REST API - no HTML scraping needed.
+"""
 from __future__ import annotations
 
-from datetime import timedelta, datetime
+from datetime import datetime
 import logging
 
 import aiohttp
-from bs4 import BeautifulSoup
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
@@ -14,7 +17,7 @@ from homeassistant.helpers.event import async_track_time_change
 from .const import DOMAIN, DEFAULT_FETCH_HOUR, DEFAULT_FETCH_MINUTE
 
 _LOGGER = logging.getLogger(__name__)
-OKTE_URL = "https://www.okte.sk/sk/kratkodoby-trh/zverejnenie-udajov-dt/celkove-vysledky-dt/"
+OKTE_API_URL = "https://isot.okte.sk/api/v1/dam/results/detail"
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -40,36 +43,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return unload_ok
 
 
-def _parse_price(text: str) -> float | None:
-    """Parse price string like '121,34' or '121.34' or '-15,37 €/MWh' to float."""
-    cleaned = (
-        text
-        .replace("\u20ac/MWh", "")
-        .replace("\xa0", "")
-        .replace(" ", "")
-        .replace("\t", "")
-        .replace(",", ".")
-        .strip()
-    )
-    try:
-        return float(cleaned)
-    except ValueError:
-        return None
-
-
-def _find_price_column(header_row) -> int:
-    """Auto-detect the Cena (€/MWh) column index from the table header."""
-    if header_row is None:
-        return 2  # default fallback based on observed OKTE structure
-    for i, th in enumerate(header_row.find_all(["th", "td"])):
-        text = th.get_text(strip=True).lower()
-        if "cena" in text or "price" in text or "eur" in text or "mwh" in text:
-            return i
-    return 2  # fallback: Perióda(0), Čas(1), Cena(2)
-
-
 class OKTEDataUpdateCoordinator(DataUpdateCoordinator):
-    """Fetches OKTE prices once daily at configured time."""
+    """Fetches OKTE prices once daily using official REST API."""
 
     def __init__(self, hass: HomeAssistant, fetch_hour: int, fetch_minute: int) -> None:
         super().__init__(hass, _LOGGER, name=DOMAIN, update_interval=None)
@@ -98,6 +73,7 @@ class OKTEDataUpdateCoordinator(DataUpdateCoordinator):
         self.async_set_updated_data(self.data)
 
     def _get_price_index(self) -> int:
+        """Return the index (0-95) for the current 15-min period."""
         now = datetime.now()
         return (now.hour * 4) + (now.minute // 15)
 
@@ -116,39 +92,44 @@ class OKTEDataUpdateCoordinator(DataUpdateCoordinator):
         self.data["current_index"] = idx
 
     async def _async_update_data(self):
-        """Fetch all 96 prices from OKTE."""
+        """Fetch all 96 prices from OKTE official REST API.
+
+        API: GET https://isot.okte.sk/api/v1/dam/results/detail?deliveryDay=YYYY-MM-DD
+        Returns a JSON array of period objects, each with a 'price' field (float, EUR/MWh).
+        Periods are 1-indexed (1=00:00-00:15 ... 96=23:45-00:00) for 15-min MTU.
+        """
         today = datetime.now().strftime('%Y-%m-%d')
-        url = f"{OKTE_URL}#date={today}&page=1"
-        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+        url = f"{OKTE_API_URL}?deliveryDay={today}"
+        headers = {
+            "User-Agent": "Mozilla/5.0 (compatible; HomeAssistant/OKTE-integration)",
+            "Accept": "application/json",
+        }
 
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=30)) as resp:
+                    if resp.status == 404:
+                        raise UpdateFailed(f"OKTE: no data published yet for {today} (HTTP 404)")
                     if resp.status != 200:
-                        raise UpdateFailed(f"OKTE HTTP error: {resp.status}")
-                    text = await resp.text()
+                        raise UpdateFailed(f"OKTE API HTTP error: {resp.status} for {url}")
+                    data = await resp.json(content_type=None)
 
-            soup = BeautifulSoup(text, "html.parser")
-            table = soup.find("table")
-            if table is None:
-                raise UpdateFailed("OKTE: table not found in page")
+            if not isinstance(data, list) or len(data) == 0:
+                raise UpdateFailed(f"OKTE: empty or invalid API response for {today}")
 
-            # Auto-detect the Cena column from header
-            header_row = table.find("tr")
-            price_col = _find_price_column(header_row)
-            _LOGGER.debug("OKTE: using price column index %d", price_col)
+            # Sort by period number to guarantee correct order
+            data_sorted = sorted(data, key=lambda x: x.get("period", 0))
 
             prices = []
-            for row in table.find_all("tr")[1:]:
-                cols = row.find_all("td")
-                if len(cols) <= price_col:
+            for period in data_sorted:
+                price = period.get("price")
+                if price is None:
+                    _LOGGER.warning("OKTE: period %s missing 'price' field", period.get("period"))
                     continue
-                val = _parse_price(cols[price_col].get_text(strip=True))
-                if val is not None:
-                    prices.append(val)
+                prices.append(float(price))
 
             if not prices:
-                raise UpdateFailed(f"OKTE: no prices parsed (tried column {price_col})")
+                raise UpdateFailed(f"OKTE: no valid prices found in API response for {today}")
 
             self._raw_prices = prices[:96]
             self._prices_date = today
@@ -159,8 +140,8 @@ class OKTEDataUpdateCoordinator(DataUpdateCoordinator):
             upcoming_5 = self._raw_prices[idx:idx + 5]
 
             _LOGGER.info(
-                "OKTE %s: %d prices (col %d), idx=%d current=%.2f \u20ac/MWh",
-                today, len(prices), price_col, idx, current or 0
+                "OKTE API %s: %d periods fetched, idx=%d, current=%.2f \u20ac/MWh",
+                today, len(prices), idx, current or 0
             )
 
             return {
