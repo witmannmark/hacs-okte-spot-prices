@@ -3,14 +3,15 @@
     "step": {
       "user": {
         "title": "OKTE Spot Ceny",
-        "description": "Nastavenie sl\u00e1vnych OKTE denn\u00fdch cien elektriny. D\u00e1ta sa nach\u00e1dzaj\u00fa na okte.sk.",
+        "description": "Ceny s\u00fa stiahnut\u00e9 raz denne v nastaven\u00fd \u010das a aktualizuj\u00fa sa ka\u017ed\u00fdch 15 min\u00fat z vyrovn\u00e1vacej pam\u00e4te.",
         "data": {
-          "scan_interval": "Interval aktuali\u017e\u00e1cie (min\u00fast)"
+          "fetch_hour": "Hodina denn\u00e9ho stiahnutia (0-23)",
+          "fetch_minute": "Min\u00fata denn\u00e9ho stiahnutia (0-59)"
         }
       }
     },
     "abort": {
-      "single_instance_allowed": "Povolená je iba jedna in\u0161t\u00e1ncia OKTE Spot Ceny."
+      "single_instance_allowed": "Povolen\u00e1 je iba jedna in\u0161t\u00e1ncia."
     }
   },
   "options": {
@@ -18,7 +19,8 @@
       "init": {
         "title": "Mo\u017enosti OKTE Spot Ceny",
         "data": {
-          "scan_interval": "Interval aktuali\u017e\u00e1cie (min\u00fast)"
+          "fetch_hour": "Hodina denn\u00e9ho stiahnutia (0-23)",
+          "fetch_minute": "Min\u00fata denn\u00e9ho stiahnutia (0-59)"
         }
       }
     }

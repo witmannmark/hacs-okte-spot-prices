@@ -104,6 +104,7 @@ class OKTESensor(CoordinatorEntity, SensorEntity):
         return {
             "date": data.get("date"),
             "prices": data.get("prices", []),
+            "current_index": data.get("current_index"),
             "negative_now": data.get("negative_now"),
             "negative_next": data.get("negative_next"),
         }

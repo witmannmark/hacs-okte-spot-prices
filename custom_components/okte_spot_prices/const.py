@@ -1,3 +1,4 @@
 DOMAIN = "okte_spot_prices"
 NAME = "OKTE Spot Prices"
-DEFAULT_SCAN_INTERVAL = 30  # minutes
+DEFAULT_FETCH_HOUR = 0
+DEFAULT_FETCH_MINUTE = 10

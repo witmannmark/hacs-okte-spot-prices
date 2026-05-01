@@ -5,7 +5,7 @@ import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.core import callback
 
-from .const import DOMAIN, NAME, DEFAULT_SCAN_INTERVAL
+from .const import DOMAIN, NAME, DEFAULT_FETCH_HOUR, DEFAULT_FETCH_MINUTE
 
 
 class OKTEConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -14,7 +14,6 @@ class OKTEConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     VERSION = 1
 
     async def async_step_user(self, user_input=None):
-        """Handle the initial step."""
         if self._async_current_entries():
             return self.async_abort(reason="single_instance_allowed")
 
@@ -22,9 +21,8 @@ class OKTEConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             return self.async_create_entry(title=NAME, data=user_input)
 
         schema = vol.Schema({
-            vol.Optional("scan_interval", default=DEFAULT_SCAN_INTERVAL): vol.All(
-                int, vol.Range(min=15, max=120)
-            ),
+            vol.Optional("fetch_hour", default=DEFAULT_FETCH_HOUR): vol.All(int, vol.Range(min=0, max=23)),
+            vol.Optional("fetch_minute", default=DEFAULT_FETCH_MINUTE): vol.All(int, vol.Range(min=0, max=59)),
         })
 
         return self.async_show_form(
@@ -40,8 +38,6 @@ class OKTEConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
 
 class OKTEOptionsFlow(config_entries.OptionsFlow):
-    """Handle options flow."""
-
     def __init__(self, config_entry):
         self.config_entry = config_entry
 
@@ -51,12 +47,13 @@ class OKTEOptionsFlow(config_entries.OptionsFlow):
 
         schema = vol.Schema({
             vol.Optional(
-                "scan_interval",
-                default=self.config_entry.options.get(
-                    "scan_interval",
-                    self.config_entry.data.get("scan_interval", DEFAULT_SCAN_INTERVAL)
-                ),
-            ): vol.All(int, vol.Range(min=15, max=120)),
+                "fetch_hour",
+                default=self.config_entry.options.get("fetch_hour", self.config_entry.data.get("fetch_hour", DEFAULT_FETCH_HOUR)),
+            ): vol.All(int, vol.Range(min=0, max=23)),
+            vol.Optional(
+                "fetch_minute",
+                default=self.config_entry.options.get("fetch_minute", self.config_entry.data.get("fetch_minute", DEFAULT_FETCH_MINUTE)),
+            ): vol.All(int, vol.Range(min=0, max=59)),
         })
 
         return self.async_show_form(step_id="init", data_schema=schema)

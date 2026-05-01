@@ -3,9 +3,10 @@
     "step": {
       "user": {
         "title": "OKTE Spot Prices",
-        "description": "Set up Slovak OKTE day-ahead electricity prices. Data is fetched from okte.sk every X minutes.",
+        "description": "Set up Slovak OKTE day-ahead electricity prices. Prices are fetched once daily at the configured time and updated every 15 minutes from cache.",
         "data": {
-          "scan_interval": "Update interval (minutes)"
+          "fetch_hour": "Daily fetch hour (0-23)",
+          "fetch_minute": "Daily fetch minute (0-59)"
         }
       }
     },
@@ -18,7 +19,8 @@
       "init": {
         "title": "OKTE Spot Prices Options",
         "data": {
-          "scan_interval": "Update interval (minutes)"
+          "fetch_hour": "Daily fetch hour (0-23)",
+          "fetch_minute": "Daily fetch minute (0-59)"
         }
       }
     }
